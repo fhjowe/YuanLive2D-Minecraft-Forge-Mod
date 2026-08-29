@@ -23,6 +23,11 @@ responsible for keeping within Live2D's license.
   (Haru) shipped with the Cubism SDK. Live2D sample data is provided under
   Live2D's sample-material terms and is not covered by this project's license.
 
+## stb_image
+
+- `native/live2d/src/stb_image_impl.cpp` — uses the single-header image
+  library `stb_image` (public domain / MIT; https://github.com/nothings/stb).
+
 ## Private / user models
 
 User-supplied Live2D models are NOT part of this repository. They are loaded
