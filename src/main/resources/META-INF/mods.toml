@@ -6,7 +6,7 @@ license="MIT"
 modId="yuan_live2d"
 version="${mod_version}"
 displayName="Yuan Live2D"
-authors="shiroha"
+authors="YuanNeo"
 description="Standalone Live2D rendering and configuration mod"
 
 [[dependencies.yuan_live2d]]
