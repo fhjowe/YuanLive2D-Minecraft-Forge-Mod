@@ -1,6 +1,6 @@
 # Yuan Live2D
 
-独立 Forge 客户端模组,提供开箱即用的 Live2D 渲染与配置界面。支持 Minecraft `1.20.1`、Forge `47.4.20`、Java 17。
+独立 Forge 客户端模组,内置 Live2D Cubism runtime 与默认模型,开箱即用(注意:当前为半成品,详见 [现状与已知问题](#现状与已知问题))。支持 Minecraft `1.20.1`、Forge `47.4.20`、Java 17。
 
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-FF9900)](https://www.minecraft.net/)
 [![Forge](https://img.shields.io/badge/Forge-47.4.20-00A7E1)]()
@@ -40,7 +40,7 @@ Copy-Item -LiteralPath "<repo>\build\libs\yuan_live2d-1.0.0.jar" `
 本模组定位为**半成品**,距离稳定仍有明显差距。以下为已知问题(不限于此):
 
 - **物理渲染不完善**:physics3 摆动、轻量物理(弹跳/躲闪/边缘挤压)、柔和投影等效果在部分模型与显卡驱动下表现不稳定,可能出现摆动幅度异常、穿模、闪烁或卡顿
-- **摆动(sway)异常**:部分模型/动作下摆动节奏与幅度与配置预期不符
+- **摆动(sway)异常**:部分模型/动作下摆动节奏与幅度和配置预期不符
 - **渲染稳定性**:模型切换、淡入淡出、纹理预算提示等偶有异常;特定驱动(尤其 AMD)存在渲染崩溃/花屏风险(开发期已有相关崩溃记录)
 - **性能**:高开销物理与多模型场景下帧率波动明显
 - 其它尚未枚举的 bug
