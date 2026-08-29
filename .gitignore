@@ -8,3 +8,6 @@ logs/
 
 # Dev-only verification script (kept locally, not published)
 scripts/
+
+# Dev docs / handoff journals (kept locally, not published)
+docs/
