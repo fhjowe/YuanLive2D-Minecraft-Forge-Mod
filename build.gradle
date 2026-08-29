@@ -1,0 +1,334 @@
+plugins {
+    id 'net.minecraftforge.gradle' version '6.0.24'
+}
+
+import java.net.URL
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.Locale
+import java.util.zip.ZipFile
+
+group = maven_group
+version = mod_version
+
+base {
+    archivesName = 'yuan_live2d'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+    options.fork = true
+}
+
+minecraft {
+    mappings channel: 'official', version: minecraft_version
+    copyIdeResources = true
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            mods { yuan_live2d { source sourceSets.main } }
+        }
+        client { args '--username', rootProject.properties.getOrDefault('minecraft_username', 'Player') }
+    }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+}
+
+sourceSets.main.resources.exclude 'runtime/**'
+
+tasks.named('processResources', ProcessResources).configure {
+    def replaceProperties = [
+        'mod_version': project.property('mod_version')
+    ]
+    inputs.properties replaceProperties
+    filesMatching('META-INF/mods.toml') {
+        expand replaceProperties
+    }
+    dependsOn 'jarRuntime', 'generateRuntimeIndex'
+}
+
+tasks.named('jar', Jar).configure { finalizedBy 'reobfJar' }
+tasks.named('sourcesJar', Jar).configure { dependsOn 'generateRuntimeIndex' }
+
+sourceSets {
+    test {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+def checkTasks = [
+    live2dConfigCheck: 'com.yuan.live2d.client.live2d.Live2DConfigCheck',
+    live2dModelRegistryCheck: 'com.yuan.live2d.client.live2d.Live2DModelRegistryCheck',
+    live2dRenderEngineCheck: 'com.yuan.live2d.client.live2d.Live2DRenderEngineCheck',
+    live2dConfigLayoutCheck: 'com.yuan.live2d.client.gui.Live2DConfigLayoutCheck',
+    live2dConfigScreenCheck: 'com.yuan.live2d.client.gui.Live2DConfigScreenCheck',
+    live2dInteractionSchedulerCheck: 'com.yuan.live2d.client.live2d.Live2DInteractionSchedulerCheck',
+    live2dInteractionMathCheck: 'com.yuan.live2d.client.live2d.Live2DInteractionMathCheck',
+    live2dPhysicsMathCheck: 'com.yuan.live2d.client.live2d.Live2DPhysicsMathCheck',
+    live2dViewTrackerCheck: 'com.yuan.live2d.client.live2d.Live2DViewTrackerCheck',
+    live2dHudRendererCheck: 'com.yuan.live2d.client.live2d.Live2DHudRendererCheck',
+    live2dOverrideLayoutCheck: 'com.yuan.live2d.client.gui.Live2DOverrideLayoutCheck',
+    live2dOverrideScreenCheck: 'com.yuan.live2d.client.gui.Live2DOverrideScreenCheck',
+    live2dAdjustMathCheck: 'com.yuan.live2d.client.live2d.Live2DAdjustMathCheck',
+    live2dAdjustSessionCheck: 'com.yuan.live2d.client.live2d.Live2DAdjustSessionCheck',
+    live2dAdjustOverlayCheck: 'com.yuan.live2d.client.live2d.Live2DAdjustOverlayCheck',
+    drawBoundsMathCheck: 'com.yuan.live2d.client.live2d.DrawBoundsMathCheck',
+    live2dFoundationCheck: 'com.yuan.live2d.client.live2d.Live2DFoundationCheck',
+    live2dNativeCheck: 'com.yuan.live2d.client.live2d.Live2DNativeCheck',
+    live2dInstallCheck: 'com.yuan.live2d.client.live2d.Live2DInstallCheck'
+]
+checkTasks.each { taskName, className ->
+    tasks.register(taskName, JavaExec) {
+        dependsOn testClasses
+        classpath = sourceSets.test.runtimeClasspath
+        mainClass = className
+        jvmArgs '-ea'
+    }
+}
+tasks.register('javaChecks') { dependsOn checkTasks.keySet() }
+
+// --- Live2D native SDK cache ---
+
+def cubismSdkParent = file("${buildDir}/live2d-native")
+def cubismSdkRoot = file("${cubismSdkParent}/cubism-sdk-pristine")
+def glewRoot = file("${cubismSdkParent}/glew-2.2.0")
+def nativeCacheDir = file("${cubismSdkParent}/downloads")
+def cubismSdkArchive = file(project.findProperty('cubism_sdk_archive')
+        ?: "${nativeCacheDir}/CubismSdkForNative-5-r.5.zip")
+def glewArchive = file(project.findProperty('glew_archive')
+        ?: "${nativeCacheDir}/glew-2.2.0.zip")
+def cubismSdkSha256 = project.findProperty('cubism_sdk_sha256')
+def glewSha256 = project.findProperty('glew_sha256')
+        ?: 'A9046A913774395A095EDCC0B0AC2D81C3AACCA61787B39839B941E9BE14E0D4'
+def jdk17 = file(project.findProperty('jdk17_home') ?: 'C:/Program Files/Java/jdk-17.0.19+10')
+def jdk17Path = jdk17.path.replace('\\', '/')
+def cmakeExe = file(project.findProperty('cmake_executable')
+        ?: 'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe')
+def nativeSourceDir = file('native/live2d')
+def nativeBuildDir = cubismSdkParent
+def stagedRuntimeDir = file("${buildDir}/live2d-native/runtime/windows-x86_64")
+def generatedRuntimeDir = file("${buildDir}/resources/main/runtime/windows-x86_64")
+def runtimeIndexFile = file('src/main/resources/runtime-index.txt')
+
+abstract class Download extends DefaultTask {
+    @Input
+    String sourceUrl
+
+    @OutputFile
+    File destFile
+
+    @TaskAction
+    void download() {
+        destFile.parentFile.mkdirs()
+        if (destFile.exists()) {
+            logger.lifecycle("Cache hit, skipping download: {}", destFile)
+            return
+        }
+        def temp = File.createTempFile('download', '.tmp', destFile.parentFile)
+        try {
+            temp.withOutputStream { out ->
+                new URL(sourceUrl).withInputStream { input -> out << input }
+            }
+            def tempHash = Files.size(temp.toPath())
+            logger.lifecycle("Downloaded {} bytes from {}", tempHash, sourceUrl)
+            Files.move(temp.toPath(), destFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            temp.delete()
+        }
+    }
+}
+
+abstract class VerifySha256 extends DefaultTask {
+    @InputFile
+    File target
+
+    @Input
+    String expected
+
+    @TaskAction
+    void verify() {
+        if (!target.exists()) {
+            throw new GradleException("Missing file for SHA-256 verification: ${target}")
+        }
+        def digest = MessageDigest.getInstance('SHA-256')
+        target.withInputStream { input ->
+            byte[] buffer = new byte[8192]
+            int read
+            while ((read = input.read(buffer)) >= 0) digest.update(buffer, 0, read)
+        }
+        def actual = digest.digest().collect { String.format('%02X', it & 0xFF) }.join()
+        if (actual != expected.toUpperCase(Locale.ROOT)) {
+            throw new GradleException("SHA-256 mismatch for ${target}: expected ${expected}, actual ${actual}")
+        }
+    }
+}
+
+tasks.register('verifyCubismSdk', VerifySha256) {
+    target = cubismSdkArchive
+    expected = cubismSdkSha256 ?: 'MISSING_CUBISM_SDK_SHA256'
+}
+
+tasks.register('downloadGlew', Download) {
+    sourceUrl = 'https://github.com/nigels-com/glew/releases/download/glew-2.2.0/glew-2.2.0.zip'
+    destFile = glewArchive
+    outputs.upToDateWhen { false }
+}
+
+tasks.register('verifyGlew', VerifySha256) {
+    dependsOn downloadGlew
+    target = glewArchive
+    expected = glewSha256
+}
+
+tasks.register('extractGlew', Sync) {
+    dependsOn verifyGlew
+    from(zipTree(glewArchive)) {
+        includeEmptyDirs = false
+        eachFile { details ->
+            details.path = details.path.substring(details.path.indexOf('/') + 1)
+        }
+    }
+    into glewRoot
+}
+
+tasks.register('extractCubismSdk', Sync) {
+    dependsOn verifyCubismSdk
+    from(zipTree(cubismSdkArchive)) {
+        includeEmptyDirs = false
+        eachFile { details ->
+            details.path = details.path.substring(details.path.indexOf('/') + 1)
+        }
+    }
+    into cubismSdkRoot
+}
+
+tasks.register('configureLive2DNative', Exec) {
+    dependsOn extractCubismSdk, extractGlew
+    commandLine cmakeExe, '-S', nativeSourceDir, '-B', nativeBuildDir,
+            '-G', 'Visual Studio 17 2022', '-A', 'x64',
+            "-DCUBISM_SDK_ROOT=${cubismSdkRoot}",
+            "-DGLEW_ROOT=${glewRoot}",
+            "-DJAVA_HOME=${jdk17Path}",
+            "-DJAVA_INCLUDE_PATH=${jdk17Path}/include"
+    environment 'JAVA_HOME', jdk17Path
+    doFirst { logger.lifecycle("Using JDK 17 include {}", "${jdk17}/include") }
+}
+
+tasks.register('buildLive2DNative', Exec) {
+    dependsOn configureLive2DNative
+    inputs.dir file("${cubismSdkRoot}/Framework")
+    inputs.dir file("${glewRoot}/src")
+    inputs.dir file("${nativeSourceDir}/src")
+    inputs.dir file("${nativeSourceDir}/tests")
+    inputs.file file("${nativeSourceDir}/patch-framework.ps1")
+    commandLine cmakeExe, '--build', nativeBuildDir, '--config', 'Release'
+}
+
+tasks.register('runLive2DNativeSmoke', Exec) {
+    dependsOn buildLive2DNative
+    workingDir nativeBuildDir
+    commandLine new File(cmakeExe.parentFile, 'ctest.exe'), '-C', 'Release', '--output-on-failure'
+}
+
+tasks.register('installLive2DRuntime', Sync) {
+    dependsOn runLive2DNativeSmoke
+    into stagedRuntimeDir
+    from("${nativeBuildDir}/Release") {
+        include 'yuan_live2d.dll'
+        include 'Live2DCubismCore.dll'
+    }
+    from(file("${cubismSdkRoot}/Framework/src/Rendering/OpenGL/Shaders/Standard")) {
+        into 'FrameworkShaders'
+    }
+    from(file("${cubismSdkRoot}/LICENSE.md")) {
+        into 'THIRD_PARTY_NOTICES'
+        rename { 'CUBISM-SDK-LICENSE.md' }
+    }
+    from(file("${cubismSdkRoot}/NOTICE.md")) {
+        into 'THIRD_PARTY_NOTICES'
+        rename { 'CUBISM-SDK-NOTICE.md' }
+    }
+    from(file("${cubismSdkRoot}/Core/LICENSE.md")) {
+        into 'THIRD_PARTY_NOTICES'
+        rename { 'CUBISM-CORE-LICENSE.md' }
+    }
+    from(file("${cubismSdkRoot}/Framework/LICENSE.md")) {
+        into 'THIRD_PARTY_NOTICES'
+        rename { 'CUBISM-FRAMEWORK-LICENSE.md' }
+    }
+    from(file("${glewRoot}/LICENSE.txt")) {
+        into 'THIRD_PARTY_NOTICES'
+        rename { 'GLEW-LICENSE.txt' }
+    }
+}
+
+tasks.register('jarRuntime', Sync) {
+    dependsOn installLive2DRuntime
+    into generatedRuntimeDir
+    from(stagedRuntimeDir) {}
+}
+
+tasks.register('generateRuntimeIndex') {
+    dependsOn jarRuntime
+    inputs.dir generatedRuntimeDir
+    outputs.file runtimeIndexFile
+    outputs.upToDateWhen { false }
+    doLast {
+        def entries = []
+        generatedRuntimeDir.eachFileRecurse { file ->
+            if (file.isFile()) {
+                entries << generatedRuntimeDir.toPath().relativize(file.toPath()).toString().replace('\\', '/')
+            }
+        }
+        entries.sort()
+        Files.writeString(runtimeIndexFile.toPath(), entries.join('\n') + '\n', StandardCharsets.UTF_8)
+    }
+}
+
+tasks.register('verifyLive2DJarExclusions') {
+    dependsOn tasks.named('reobfJar')
+    doLast {
+        File jarFile = tasks.named('jar').get().archiveFile.get().asFile
+        if (!jarFile.exists()) throw new GradleException("Missing jar: ${jarFile}")
+        new ZipFile(jarFile).withCloseable { zip ->
+            List<String> entries = zip.entries().collect { it.name }
+            List<String> missing = []
+            [
+                'runtime/windows-x86_64/yuan_live2d.dll',
+                'runtime/windows-x86_64/Live2DCubismCore.dll',
+                'models/Haru/Haru.model3.json'
+            ].each { path ->
+                if (!entries.contains(path)) missing << path
+            }
+            if (!entries.any { it.startsWith('runtime/windows-x86_64/FrameworkShaders/') }) {
+                missing << 'runtime/windows-x86_64/FrameworkShaders/'
+            }
+            if (!entries.any { it.startsWith('runtime/windows-x86_64/THIRD_PARTY_NOTICES/') }) {
+                missing << 'runtime/windows-x86_64/THIRD_PARTY_NOTICES/'
+            }
+            if (!entries.contains('runtime-index.txt')) missing << 'runtime-index.txt'
+            if (!missing.isEmpty()) {
+                throw new GradleException("Jar is missing Live2D runtime entries: ${missing}")
+            }
+        }
+    }
+}
+
+tasks.named('build') {
+    dependsOn 'javaChecks', 'buildLive2DNative', 'runLive2DNativeSmoke', 'jarRuntime',
+            'generateRuntimeIndex', 'verifyLive2DJarExclusions'
+}

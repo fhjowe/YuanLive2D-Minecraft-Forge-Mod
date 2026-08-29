@@ -1,0 +1,24 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+
+[[mods]]
+modId="yuan_live2d"
+version="${mod_version}"
+displayName="Yuan Live2D"
+authors="shiroha"
+description="Standalone Live2D rendering and configuration mod"
+
+[[dependencies.yuan_live2d]]
+modId="forge"
+mandatory=true
+versionRange="[47,)"
+ordering="NONE"
+side="CLIENT"
+
+[[dependencies.yuan_live2d]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1,1.21)"
+ordering="NONE"
+side="CLIENT"

@@ -1,0 +1,10 @@
+.gradle/
+build/
+run/
+logs/
+.superpowers/
+*.class
+*.log
+
+# Dev-only verification script (kept locally, not published)
+scripts/
